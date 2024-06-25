@@ -2,7 +2,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "name": "open-next",
+  "name": "@genezio/open-next",
   "version": "3.0.5",
   "bin": {
     "open-next": "./dist/index.js"
