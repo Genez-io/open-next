@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: ["@example/shared"],
+  i18n: {
+    locales: ["en", "nl"],
+    defaultLocale: "en",
+  },
   cleanDistDir: true,
   reactStrictMode: true,
   output: "standalone",
@@ -9,10 +13,11 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   rewrites: () => [
-    { source: "/rewrite", destination: "/" },
+    { source: "/rewrite", destination: "/", locale: false },
     {
       source: "/rewriteUsingQuery",
       destination: "/:destination/",
+      locale: false,
       has: [
         {
           type: "query",
@@ -20,6 +25,15 @@ const nextConfig = {
           value: "(?<destination>\\w+)",
         },
       ],
+    },
+  ],
+  redirects: () => [
+    {
+      source: "/next-config-redirect-without-locale-support/",
+      destination: "https://open-next.js.org/",
+      permanent: false,
+      basePath: false,
+      locale: false,
     },
   ],
   trailingSlash: true,
