@@ -50,11 +50,13 @@ export async function build(
 
   // Load open-next.config.ts
   const tempDir = initTempDir();
-  const configPath = compileOpenNextConfigNode(
+  let configPath = compileOpenNextConfigNode(
     tempDir,
     openNextConfigPath,
     nodeExternals,
   );
+  // On Windows, we need to use file:// protocol to load the config file using import()
+  if (process.platform === "win32") configPath = `file://${configPath}`;
   config = (await import(configPath)).default as OpenNextConfig;
   validateConfig(config);
 
@@ -333,7 +335,8 @@ async function createImageOptimizationBundle(config: OpenNextConfig) {
     plugins.push(
       openNextReplacementPlugin({
         name: "opennext-14.1.1-image-optimization",
-        target: /plugins\/image-optimization\/image-optimization\.js/g,
+        target:
+          /plugins(\/|\\)image-optimization(\/|\\)image-optimization\.js/g,
         replacements: [
           require.resolve(
             "./adapters/plugins/image-optimization/image-optimization.replacement.js",
