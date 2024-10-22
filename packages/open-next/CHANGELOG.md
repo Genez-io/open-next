@@ -1,5 +1,12 @@
 # open-next
 
+## 3.0.10
+
+### Patch Changes
+
+- [#567](https://github.com/opennextjs/opennextjs-aws/pull/567) [`d6d4b8f`](https://github.com/Genez-io/open-next/commit/d6d4b8f83da47b7ec3b0e7b565c38567a3ff0742) Thanks [@sommeeeer](https://github.com/sommeeeer)! - Hides the x-opennext header from server requests when poweredByHeader is false in next config
+  Syncs open-next with the upstream version
+
 ## 3.1.6
 
 ### Patch Changes
