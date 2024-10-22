@@ -14,8 +14,10 @@ import type {
   RouteHas,
 } from "types/next-types";
 import { InternalEvent, InternalResult } from "types/open-next";
+import { emptyReadableStream, toReadableStream } from "utils/stream";
 
 import { debug } from "../../adapters/logger";
+import { localizePath } from "./i18n";
 import {
   convertFromQueryString,
   convertToQueryString,
@@ -142,14 +144,24 @@ export function addNextConfigHeaders(
 
   const requestHeaders: Record<string, string> = {};
 
-  for (const { headers, has, missing, regex, source } of configHeaders) {
+  const localizedRawPath = localizePath(event);
+
+  for (const {
+    headers,
+    has,
+    missing,
+    regex,
+    source,
+    locale,
+  } of configHeaders) {
+    const path = locale === false ? rawPath : localizedRawPath;
     if (
-      new RegExp(regex).test(rawPath) &&
+      new RegExp(regex).test(path) &&
       checkHas(matcher, has) &&
       checkHas(matcher, missing, true)
     ) {
       const fromSource = match(source);
-      const _match = fromSource(rawPath);
+      const _match = fromSource(path);
       headers.forEach((h) => {
         try {
           const key = convertMatch(_match, compile(h.key), h.key);
@@ -170,14 +182,17 @@ export function handleRewrites<T extends RewriteDefinition>(
   rewrites: T[],
 ) {
   const { rawPath, headers, query, cookies } = event;
+  const localizedRawPath = localizePath(event);
   const matcher = routeHasMatcher(headers, cookies, query);
   const computeHas = computeParamHas(headers, cookies, query);
-  const rewrite = rewrites.find(
-    (route) =>
-      new RegExp(route.regex).test(rawPath) &&
+  const rewrite = rewrites.find((route) => {
+    const path = route.locale === false ? rawPath : localizedRawPath;
+    return (
+      new RegExp(route.regex).test(path) &&
       checkHas(matcher, route.has) &&
-      checkHas(matcher, route.missing, true),
-  );
+      checkHas(matcher, route.missing, true)
+    );
+  });
   let finalQuery = query;
 
   let rewrittenUrl = rawPath;
@@ -188,6 +203,8 @@ export function handleRewrites<T extends RewriteDefinition>(
       rewrite.destination,
       isExternalRewrite,
     );
+    // We need to use a localized path if the rewrite is not locale specific
+    const pathToUse = rewrite.locale === false ? rawPath : localizedRawPath;
     debug("urlParts", { pathname, protocol, hostname, queryString });
     const toDestinationPath = compile(escapeRegex(pathname ?? "") ?? "");
     const toDestinationHost = compile(escapeRegex(hostname ?? "") ?? "");
@@ -195,7 +212,7 @@ export function handleRewrites<T extends RewriteDefinition>(
     let params = {
       // params for the source
       ...getParamsFromSource(match(escapeRegex(rewrite?.source) ?? ""))(
-        rawPath,
+        pathToUse,
       ),
       // params for the has
       ...rewrite.has?.reduce((acc, cur) => {
@@ -237,8 +254,11 @@ export function handleRewrites<T extends RewriteDefinition>(
   };
 }
 
-function handleTrailingSlashRedirect(event: InternalEvent) {
+function handleTrailingSlashRedirect(
+  event: InternalEvent,
+): false | InternalResult {
   const url = new URL(event.url, "http://localhost");
+  const emptyBody = emptyReadableStream();
 
   if (
     // Someone is trying to redirect to a different origin, let's not do that
@@ -264,7 +284,7 @@ function handleTrailingSlashRedirect(event: InternalEvent) {
           headersLocation[1] ? `?${headersLocation[1]}` : ""
         }`,
       },
-      body: "",
+      body: emptyBody,
       isBase64Encoded: false,
     };
     // eslint-disable-next-line sonarjs/elseif-without-else
@@ -282,7 +302,7 @@ function handleTrailingSlashRedirect(event: InternalEvent) {
           headersLocation[1] ? `?${headersLocation[1]}` : ""
         }`,
       },
-      body: "",
+      body: emptyBody,
       isBase64Encoded: false,
     };
   } else return false;
@@ -305,7 +325,7 @@ export function handleRedirects(
       headers: {
         Location: internalEvent.url,
       },
-      body: "",
+      body: emptyReadableStream(),
       isBase64Encoded: false,
     };
   }
@@ -322,7 +342,7 @@ export function fixDataPage(
     return {
       type: internalEvent.type,
       statusCode: 404,
-      body: "{}",
+      body: toReadableStream("{}"),
       headers: {
         "Content-Type": "application/json",
       },

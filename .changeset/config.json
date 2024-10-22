@@ -1,6 +1,9 @@
 {
   "$schema": "https://unpkg.com/@changesets/config@2.3.0/schema.json",
-  "changelog": "@changesets/cli/changelog",
+  "changelog": [
+    "@changesets/changelog-github",
+    { "repo": "Genez-io/open-next" }
+  ],
   "commit": false,
   "fixed": [["@genezio/open-next"]],
   "linked": [],

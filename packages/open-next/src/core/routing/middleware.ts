@@ -1,6 +1,10 @@
+import { ReadableStream } from "node:stream/web";
+
 import { MiddlewareManifest, NextConfig } from "config/index.js";
 import { InternalEvent, InternalResult } from "types/open-next.js";
+import { emptyReadableStream } from "utils/stream.js";
 
+import { localizePath } from "./i18n/index.js";
 //NOTE: we should try to avoid importing stuff from next as much as possible
 // every release of next could break this
 // const { run } = require("next/dist/server/web/sandbox");
@@ -24,38 +28,27 @@ type MiddlewareOutputEvent = InternalEvent & {
   externalRewrite?: boolean;
 };
 
+type Middleware = (request: Request) => Response | Promise<Response>;
+type MiddlewareLoader = () => Promise<{ default: Middleware }>;
+
+function defaultMiddlewareLoader() {
+  // @ts-expect-error - This is bundled
+  return import("./middleware.mjs");
+}
+
 // NOTE: As of Nextjs 13.4.13+, the middleware is handled outside the next-server.
 // OpenNext will run the middleware in a sandbox and set the appropriate req headers
 // and res.body prior to processing the next-server.
 // @returns undefined | res.end()
 
-// NOTE: We need to normalize the locale path before passing it to the middleware
-// See https://github.com/vercel/next.js/blob/39589ff35003ba73f92b7f7b349b3fdd3458819f/packages/next/src/shared/lib/i18n/normalize-locale-path.ts#L15
-function normalizeLocalePath(pathname: string) {
-  // first item will be empty string from splitting at first char
-  const pathnameParts = pathname.split("/");
-  const locales = NextConfig.i18n?.locales;
-
-  (locales || []).some((locale) => {
-    if (
-      pathnameParts[1] &&
-      pathnameParts[1].toLowerCase() === locale.toLowerCase()
-    ) {
-      pathnameParts.splice(1, 1);
-      pathname = pathnameParts.join("/") || "/";
-      return true;
-    }
-    return false;
-  });
-
-  return locales && !pathname.endsWith("/") ? `${pathname}/` : pathname;
-}
 //    if res.end() is return, the parent needs to return and not process next server
 export async function handleMiddleware(
   internalEvent: InternalEvent,
+  middlewareLoader: MiddlewareLoader = defaultMiddlewareLoader,
 ): Promise<MiddlewareOutputEvent | InternalResult> {
-  const { rawPath, query } = internalEvent;
-  const normalizedPath = normalizeLocalePath(rawPath);
+  const { query } = internalEvent;
+  const normalizedPath = localizePath(internalEvent);
+  // We only need the normalizedPath to check if the middleware should run
   const hasMatch = middleMatch.some((r) => r.test(normalizedPath));
   if (!hasMatch) return internalEvent;
   // We bypass the middleware if the request is internal
@@ -69,8 +62,7 @@ export async function handleMiddleware(
   const url = initialUrl.toString();
   // console.log("url", url, normalizedPath);
 
-  // @ts-expect-error - This is bundled
-  const middleware = await import("./middleware.mjs");
+  const middleware = await middlewareLoader();
 
   const result: Response = await middleware.default({
     geo: {
@@ -89,7 +81,7 @@ export async function handleMiddleware(
     },
     url,
     body: convertBodyToReadableStream(internalEvent.method, internalEvent.body),
-  });
+  } as unknown as Request);
   const statusCode = result.status;
 
   /* Apply override headers from middleware
@@ -137,7 +129,7 @@ export async function handleMiddleware(
         ) ?? resHeaders.location;
     // res.setHeader("Location", location);
     return {
-      body: "",
+      body: emptyReadableStream(),
       type: internalEvent.type,
       statusCode: statusCode,
       headers: resHeaders,
@@ -182,16 +174,14 @@ export async function handleMiddleware(
   // the body immediately to the client.
   if (result.body) {
     // transfer response body to res
-    const arrayBuffer = await result.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    // res.end(buffer);
+    const body = result.body as ReadableStream<Uint8Array>;
 
     // await pipeReadable(result.response.body, res);
     return {
       type: internalEvent.type,
       statusCode: statusCode,
       headers: resHeaders,
-      body: buffer.toString(),
+      body,
       isBase64Encoded: false,
     };
   }

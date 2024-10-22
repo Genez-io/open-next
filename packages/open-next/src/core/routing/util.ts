@@ -1,12 +1,13 @@
 import crypto from "node:crypto";
 import { OutgoingHttpHeaders } from "node:http";
+import { Readable } from "node:stream";
 
-import { BuildId, HtmlPages } from "config/index.js";
+import { BuildId, HtmlPages, NextConfig } from "config/index.js";
 import type { IncomingMessage, StreamCreator } from "http/index.js";
 import { OpenNextNodeResponse } from "http/openNextResponse.js";
 import { parseHeaders } from "http/util.js";
 import type { MiddlewareManifest } from "types/next-types";
-import { InternalEvent } from "types/open-next.js";
+import { InternalEvent, InternalResult } from "types/open-next.js";
 
 import { isBinaryContentType } from "../../adapters/binary.js";
 import { debug, error } from "../../adapters/logger.js";
@@ -69,20 +70,20 @@ export function getUrlParts(url: string, isExternal: boolean) {
  *
  * @__PURE__
  */
-export function convertRes(res: OpenNextNodeResponse) {
+export function convertRes(res: OpenNextNodeResponse): InternalResult {
   // Format Next.js response to Lambda response
   const statusCode = res.statusCode || 200;
   // When using HEAD requests, it seems that flushHeaders is not called, not sure why
   // Probably some kind of race condition
   const headers = parseHeaders(res.getFixedHeaders());
-  const isBase64Encoded = isBinaryContentType(
-    Array.isArray(headers["content-type"])
-      ? headers["content-type"][0]
-      : headers["content-type"],
-  );
-  const encoding = isBase64Encoded ? "base64" : "utf8";
-  const body = res.body.toString(encoding);
+  const isBase64Encoded =
+    isBinaryContentType(headers["content-type"]) ||
+    !!headers["content-encoding"];
+  // We cannot convert the OpenNextNodeResponse to a ReadableStream directly
+  // You can look in the `aws-lambda.ts` file for some context
+  const body = Readable.toWeb(Readable.from(res.getBody()));
   return {
+    type: "core",
     statusCode,
     headers,
     body,
@@ -180,6 +181,7 @@ function filterHeadersForProxy(
     "x-cache",
     "transfer-encoding",
     "content-encoding",
+    "content-length",
   ];
   Object.entries(headers).forEach(([key, value]) => {
     const lowerKey = key.toLowerCase();
@@ -249,7 +251,7 @@ export async function proxyRequest(
           res.end();
           reject(e);
         });
-        _res.on("end", () => {
+        res.on("finish", () => {
           resolve();
         });
       },
@@ -320,7 +322,9 @@ export function fixSWRCacheHeader(headers: OutgoingHttpHeaders) {
  * @__PURE__
  */
 export function addOpenNextHeader(headers: OutgoingHttpHeaders) {
-  headers["X-OpenNext"] = "1";
+  if (NextConfig.poweredByHeader) {
+    headers["X-OpenNext"] = "1";
+  }
   if (globalThis.openNextDebug) {
     headers["X-OpenNext-Version"] = globalThis.openNextVersion;
     headers["X-OpenNext-RequestId"] = globalThis.__als.getStore()?.requestId;
@@ -392,7 +396,7 @@ export async function revalidateIfRequired(
 // We can't just use a random string because we need to ensure that the same rawPath
 // will always have the same messageGroupId.
 // https://stackoverflow.com/questions/521295/seeding-the-random-number-generator-in-javascript#answer-47593316
-function generateMessageGroupId(rawPath: string) {
+export function generateMessageGroupId(rawPath: string) {
   let a = cyrb128(rawPath);
   // We use mulberry32 to generate a random int between 0 and MAX_REVALIDATE_CONCURRENCY
   var t = (a += 0x6d2b79f5);

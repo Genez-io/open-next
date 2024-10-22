@@ -7,6 +7,7 @@ import {
 import { InternalEvent, InternalResult, Origin } from "types/open-next";
 
 import { debug } from "../adapters/logger";
+import { cacheInterceptor } from "./routing/cacheInterceptor";
 import {
   addNextConfigHeaders,
   fixDataPage,
@@ -25,16 +26,49 @@ export interface MiddlewareOutputEvent {
 
 // Add the locale prefix to the regex so we correctly match the rawPath
 const optionalLocalePrefixRegex = !!RoutesManifest.locales.length
-  ? `^/(?:${RoutesManifest.locales.map((locale) => `${locale}/?`).join("|")})?`
+  ? `^/(?:${RoutesManifest.locales.map((locale) => locale + "/?").join("|")})?`
   : "^/";
 
+// Add the basepath prefix to the regex so we correctly match the rawPath
+const optionalBasepathPrefixRegex = !!RoutesManifest.basePath
+  ? `^${RoutesManifest.basePath}/?`
+  : "^/";
+
+// Add the basePath prefix to the api routes
+const apiPrefix = !!RoutesManifest.basePath
+  ? `${RoutesManifest.basePath}/api`
+  : "/api";
+
 const staticRegexp = RoutesManifest.routes.static.map(
-  (route) => new RegExp(route.regex.replace("^/", optionalLocalePrefixRegex)),
+  (route) =>
+    new RegExp(
+      route.regex
+        .replace("^/", optionalLocalePrefixRegex)
+        .replace("^/", optionalBasepathPrefixRegex),
+    ),
 );
 
 const dynamicRegexp = RoutesManifest.routes.dynamic.map(
-  (route) => new RegExp(route.regex.replace("^/", optionalLocalePrefixRegex)),
+  (route) =>
+    new RegExp(
+      route.regex
+        .replace("^/", optionalLocalePrefixRegex)
+        .replace("^/", optionalBasepathPrefixRegex),
+    ),
 );
+
+function applyMiddlewareHeaders(
+  eventHeaders: Record<string, string | string[]>,
+  middlewareHeaders: Record<string, string | string[] | undefined>,
+  setPrefix = true,
+) {
+  Object.entries(middlewareHeaders).forEach(([key, value]) => {
+    if (value) {
+      eventHeaders[`${setPrefix ? "x-middleware-response-" : ""}${key}`] =
+        Array.isArray(value) ? value.join(",") : value;
+    }
+  });
+}
 
 export default async function routingHandler(
   event: InternalEvent,
@@ -116,8 +150,8 @@ export default async function routingHandler(
   // /api even if it's a page route doesn't get generated in the manifest
   // Ideally we would need to properly check api routes here
   const isApiRoute =
-    internalEvent.rawPath === "/api" ||
-    internalEvent.rawPath.startsWith("/api/");
+    internalEvent.rawPath === apiPrefix ||
+    internalEvent.rawPath.startsWith(`${apiPrefix}/`);
 
   const isNextImageRoute = internalEvent.rawPath.startsWith("/_next/image");
 
@@ -150,18 +184,29 @@ export default async function routingHandler(
     };
   }
 
+  if (
+    globalThis.openNextConfig.dangerous?.enableCacheInterception &&
+    !("statusCode" in internalEvent)
+  ) {
+    debug("Cache interception enabled");
+    internalEvent = await cacheInterceptor(internalEvent);
+    if ("statusCode" in internalEvent) {
+      applyMiddlewareHeaders(
+        internalEvent.headers,
+        {
+          ...middlewareResponseHeaders,
+          ...nextHeaders,
+        },
+        false,
+      );
+      return internalEvent;
+    }
+  }
+
   // We apply the headers from the middleware response last
-  Object.entries({
+  applyMiddlewareHeaders(internalEvent.headers, {
     ...middlewareResponseHeaders,
     ...nextHeaders,
-  }).forEach(([key, value]) => {
-    if (value) {
-      internalEvent.headers[`x-middleware-response-${key}`] = Array.isArray(
-        value,
-      )
-        ? value.join(",")
-        : value;
-    }
   });
 
   return {

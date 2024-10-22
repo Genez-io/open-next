@@ -1,3 +1,5 @@
+import { Writable } from "node:stream";
+
 import type {
   APIGatewayProxyEvent,
   APIGatewayProxyEventV2,
@@ -7,7 +9,6 @@ import type {
   CloudFrontRequestResult,
 } from "aws-lambda";
 import { StreamCreator } from "http/openNextResponse";
-import { Writable } from "stream";
 import type { WrapperHandler } from "types/open-next";
 
 import { WarmerEvent, WarmerResponse } from "../adapters/warmer-function";

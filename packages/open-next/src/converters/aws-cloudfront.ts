@@ -8,6 +8,7 @@ import {
 import { OutgoingHttpHeader } from "http";
 import { parseCookies } from "http/util";
 import type { Converter, InternalEvent, InternalResult } from "types/open-next";
+import { fromReadableStream } from "utils/stream";
 
 import { debug } from "../adapters/logger";
 import {
@@ -114,6 +115,7 @@ function convertToCloudfrontHeaders(
 ) {
   const cloudfrontHeaders: CloudFrontHeaders = {};
   Object.entries(headers)
+    .map(([key, value]) => [key.toLowerCase(), value] as const)
     .filter(
       ([key]) =>
         !CloudFrontBlacklistedHeaders.some((header) =>
@@ -147,18 +149,19 @@ async function convertToCloudFrontRequestResult(
   result: InternalResult | MiddlewareEvent,
   originalRequest: CloudFrontRequestEvent,
 ): Promise<CloudFrontRequestResult> {
-  let responseHeaders =
-    result.type === "middleware"
-      ? result.internalEvent.headers
-      : result.headers;
   if (result.type === "middleware") {
     const { method, clientIp, origin } = originalRequest.Records[0].cf.request;
+    const responseHeaders = result.internalEvent.headers;
 
     // Handle external rewrite
     if (result.isExternalRewrite) {
       const serverResponse = createServerResponse(result.internalEvent, {});
       await proxyRequest(result.internalEvent, serverResponse);
       const externalResult = convertRes(serverResponse);
+      const body = await fromReadableStream(
+        externalResult.body,
+        externalResult.isBase64Encoded,
+      );
       const cloudfrontResult = {
         status: externalResult.statusCode.toString(),
         statusDescription: "OK",
@@ -166,7 +169,7 @@ async function convertToCloudFrontRequestResult(
         bodyEncoding: externalResult.isBase64Encoded
           ? ("base64" as const)
           : ("text" as const),
-        body: externalResult.body,
+        body,
       };
       debug("externalResult", cloudfrontResult);
       return cloudfrontResult;
@@ -208,13 +211,17 @@ async function convertToCloudFrontRequestResult(
     return response;
   }
 
+  const body = await fromReadableStream(result.body, result.isBase64Encoded);
+  const responseHeaders = result.headers;
+
   const response: CloudFrontRequestResult = {
     status: result.statusCode.toString(),
     statusDescription: "OK",
     headers: convertToCloudfrontHeaders(responseHeaders, true),
     bodyEncoding: result.isBase64Encoded ? "base64" : "text",
-    body: result.body,
+    body,
   };
+
   debug(response);
   return response;
 }

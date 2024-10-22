@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { createRequire as topLevelCreateRequire } from "node:module";
+import { createRequire } from "node:module";
 import path from "node:path";
 import url from "node:url";
 
@@ -12,18 +12,26 @@ import { OpenNextConfig } from "types/open-next.js";
 
 import logger from "../logger.js";
 
-const require = topLevelCreateRequire(import.meta.url);
+const require = createRequire(import.meta.url);
 const __dirname = url.fileURLToPath(new URL(".", import.meta.url));
 
 export type BuildOptions = ReturnType<typeof normalizeOptions>;
 
-export function normalizeOptions(config: OpenNextConfig, root: string) {
+export function normalizeOptions(
+  config: OpenNextConfig,
+  distDir: string,
+  tempBuildDir: string,
+) {
   const appPath = path.join(process.cwd(), config.appPath || ".");
   const buildOutputPath = path.join(
     process.cwd(),
     config.buildOutputPath || ".",
   );
   const outputDir = path.join(buildOutputPath, ".open-next");
+
+  const { root: monorepoRoot, packager } = findMonorepoRoot(
+    path.join(process.cwd(), config.appPath || "."),
+  );
 
   let appPackageJsonPath: string;
   if (config.packageJsonPath) {
@@ -32,20 +40,51 @@ export function normalizeOptions(config: OpenNextConfig, root: string) {
       ? _pkgPath
       : path.join(_pkgPath, "./package.json");
   } else {
-    appPackageJsonPath = findNextPackageJsonPath(appPath, root);
+    appPackageJsonPath = findNextPackageJsonPath(appPath, monorepoRoot);
   }
+
   return {
-    openNextVersion: getOpenNextVersion(),
-    nextVersion: getNextVersion(appPath),
+    appBuildOutputPath: buildOutputPath,
     appPackageJsonPath,
     appPath,
-    appBuildOutputPath: buildOutputPath,
     appPublicPath: path.join(appPath, "public"),
-    outputDir,
-    tempDir: path.join(outputDir, ".build"),
+    buildDir: path.join(outputDir, ".build"),
+    config,
     debug: Boolean(process.env.OPEN_NEXT_DEBUG) ?? false,
-    monorepoRoot: root,
+    monorepoRoot,
+    nextVersion: getNextVersion(appPath),
+    openNextVersion: getOpenNextVersion(),
+    openNextDistDir: distDir,
+    outputDir,
+    packager,
+    tempBuildDir,
   };
+}
+
+function findMonorepoRoot(appPath: string) {
+  let currentPath = appPath;
+  while (currentPath !== "/") {
+    const found = [
+      { file: "package-lock.json", packager: "npm" as const },
+      { file: "yarn.lock", packager: "yarn" as const },
+      { file: "pnpm-lock.yaml", packager: "pnpm" as const },
+      { file: "bun.lockb", packager: "bun" as const },
+    ].find((f) => fs.existsSync(path.join(currentPath, f.file)));
+
+    if (found) {
+      if (currentPath !== appPath) {
+        logger.info("Monorepo detected at", currentPath);
+      }
+      return { root: currentPath, packager: found.packager };
+    }
+    currentPath = path.dirname(currentPath);
+  }
+
+  // note: a lock file (package-lock.json, yarn.lock, or pnpm-lock.yaml) is
+  //       not found in the app's directory or any of its parent directories.
+  //       We are going to assume that the app is not part of a monorepo.
+  logger.warn("No lockfile found");
+  return { root: appPath, packager: "npm" as const };
 }
 
 function findNextPackageJsonPath(appPath: string, root: string) {
@@ -193,10 +232,7 @@ export function getHtmlPages(dotNextPath: string) {
   return Object.entries(JSON.parse(manifest))
     .filter(([_, value]) => (value as string).endsWith(".html"))
     .map(([_, value]) => (value as string).replace(/^pages\//, ""))
-    .reduce((acc, page) => {
-      acc.add(page);
-      return acc;
-    }, new Set<string>());
+    .reduce((acc, page) => acc.add(page), new Set<string>());
 }
 
 export function getBuildId(dotNextPath: string) {
@@ -241,17 +277,17 @@ export function compareSemver(v1: string, v2: string): number {
 }
 
 export function copyOpenNextConfig(
-  tempDir: string,
-  outputPath: string,
+  inputDir: string,
+  outputDir: string,
   isEdge = false,
 ) {
   // Copy open-next.config.mjs
   fs.copyFileSync(
     path.join(
-      tempDir,
+      inputDir,
       isEdge ? "open-next.config.edge.mjs" : "open-next.config.mjs",
     ),
-    path.join(outputPath, "open-next.config.mjs"),
+    path.join(outputDir, "open-next.config.mjs"),
   );
 }
 
@@ -270,4 +306,43 @@ export function copyEnvFile(
   if (fs.existsSync(envProdPath)) {
     fs.copyFileSync(envProdPath, path.join(baseOutputPath, ".env.production"));
   }
+}
+
+/**
+ * Check we are in a Nextjs app by looking for the Nextjs config file.
+ */
+export function checkRunningInsideNextjsApp(options: BuildOptions) {
+  const { appPath } = options;
+  const extension = ["js", "cjs", "mjs", "ts"].find((ext) =>
+    fs.existsSync(path.join(appPath, `next.config.${ext}`)),
+  );
+  if (!extension) {
+    logger.error(
+      "Error: next.config.js not found. Please make sure you are running this command inside a Next.js app.",
+    );
+    process.exit(1);
+  }
+}
+
+export function printNextjsVersion(options: BuildOptions) {
+  logger.info(`Next.js version : ${options.nextVersion}`);
+}
+
+export function printOpenNextVersion(options: BuildOptions) {
+  logger.info(`OpenNext v${options.openNextVersion}`);
+}
+
+/**
+ * Populates the build directory with the compiled configuration files.
+ *
+ * We need to get the build relative to the cwd to find the compiled config.
+ * This is needed for the case where the app is a single-version monorepo
+ * and the package.json is in the root of the monorepo where the build is in
+ * the app directory, but the compiled config is in the root of the monorepo.
+ */
+export function initOutputDir(options: BuildOptions) {
+  fs.rmSync(options.outputDir, { recursive: true, force: true });
+  const { buildDir } = options;
+  fs.mkdirSync(buildDir, { recursive: true });
+  fs.cpSync(options.tempBuildDir, buildDir, { recursive: true });
 }

@@ -1,9 +1,84 @@
 # open-next
 
+## 3.1.6
+
+### Patch Changes
+
+- [`ad513ef`](https://github.com/opennextjs/opennextjs-aws/commit/ad513efb8856ebdfbc11482537986abb0524ab75) Thanks [@thdxr](https://github.com/thdxr)! - remove extra binary in bin specification
+
+## 3.1.5
+
+### Patch Changes
+
+- [#542](https://github.com/opennextjs/opennextjs-aws/pull/542) [`178ab2b`](https://github.com/opennextjs/opennextjs-aws/commit/178ab2b1c95701a5f20aec107acf1fe1c6e3d9be) Thanks [@conico974](https://github.com/conico974)! - Basic support for PPR
+
+- [#555](https://github.com/opennextjs/opennextjs-aws/pull/555) [`a5fd42f`](https://github.com/opennextjs/opennextjs-aws/commit/a5fd42fa76a329cf79bba8a6af20f87481074e47) Thanks [@JackParn33](https://github.com/JackParn33)! - Fixes proxy handling of encoded request/responses, previously responses could be cut off.
+
+## 3.1.4
+
+### Patch Changes
+
+- b5bfb5d: Fix response binary content handling
+- 6b894df: lazily initialize lite client
+- 8b576d9: fix content-length incorrectly set in proxyRequest
+- 9fceedb: fix: fix basePath support for API routes
+- 5cdbc9f: Update vulnerable path-to-regexp dependency
+- 50703a3: Fix cloudflare env
+  Fix an issue with cookies and the node wrapper
+  Fix some issue with cookies being not properly set when set both in the routing layer and the route itself
+  Added option for headers priority
+
+## 3.1.3
+
+### Patch Changes
+
+- 4ec9265: fix middleware and headers matcher not working properly with i18n
+- 4894974: Improve config validation
+- 55a6bcc: fix incremental cache for next 15
+
+## 3.1.2
+
+### Patch Changes
+
+- 1b87222: patch asyncStorage for ISR and fetch
+- a7540fd: fix wrong locale in middleware
+- b8bd2f0: fix \_\_import_unsupported being undefined
+
+## 3.1.1
+
+### Patch Changes
+
+- 85af1ce: Fix node crashing when used without stream
+- 2094c9b: fix issue with fetch cache for new page
+
+## 3.1.0
+
+### Minor Changes
+
+- b88ae13: Replace InternalResult body from string to ReadableStream
+- 0558bf6: Add an optional external cache
+
+### Patch Changes
+
+- c8d692b: fix missing polyfill URLPattern
+- 1b91708: fix 404 when basePath is set
+- 8ddb621: fix lambda streaming hanging after return
+
 ## 3.0.8
 
 ### Patch Changes
 
+- 75857cf: fix middleware for next 15
+- 1dd2b16: fix: Nx monorepo support
+- 220be99: fix rewrite/redirect with i18n
+- b93034d: Fix issues with revalidateTag/revalidatePath
+- 59ff2ee: support next.config.ts
+
+## 3.0.7
+
+### Patch Changes
+
+- 1a1441c: Add missing method from NextResponse for next 12
 - b8ffa3a: add check for config and config.default
 - ab0f8b2: [windows] Add Windows compatibility for the `resolve` ESBuild plugin
 - 7beaf82: [windows] Add Windows compatibility for the `replacement` ESBuild plugin

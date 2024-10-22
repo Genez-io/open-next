@@ -4,6 +4,91 @@
 
 ### Patch Changes
 
+- Updated dependencies [[`ad513ef`](https://github.com/opennextjs/opennextjs-aws/commit/ad513efb8856ebdfbc11482537986abb0524ab75)]:
+  - @opennextjs/aws@3.1.6
+
+## null
+
+### Patch Changes
+
+- Updated dependencies [[`178ab2b`](https://github.com/opennextjs/opennextjs-aws/commit/178ab2b1c95701a5f20aec107acf1fe1c6e3d9be), [`a5fd42f`](https://github.com/opennextjs/opennextjs-aws/commit/a5fd42fa76a329cf79bba8a6af20f87481074e47)]:
+  - @opennextjs/aws@3.1.5
+
+## null
+
+### Patch Changes
+
+- Updated dependencies [b5bfb5d]
+- Updated dependencies [6b894df]
+- Updated dependencies [8b576d9]
+- Updated dependencies [9fceedb]
+- Updated dependencies [5cdbc9f]
+- Updated dependencies [50703a3]
+  - @opennextjs/aws@3.1.4
+
+## null
+
+### Patch Changes
+
+- Updated dependencies [4ec9265]
+- Updated dependencies [4894974]
+- Updated dependencies [55a6bcc]
+  - open-next@3.1.3
+
+## null
+
+### Patch Changes
+
+- Updated dependencies [1b87222]
+- Updated dependencies [a7540fd]
+- Updated dependencies [b8bd2f0]
+  - open-next@3.1.2
+
+## null
+
+### Patch Changes
+
+- Updated dependencies [85af1ce]
+- Updated dependencies [2094c9b]
+  - open-next@3.1.1
+
+## null
+
+### Patch Changes
+
+- Updated dependencies [c8d692b]
+- Updated dependencies [1b91708]
+- Updated dependencies [b88ae13]
+- Updated dependencies [8ddb621]
+- Updated dependencies [0558bf6]
+  - open-next@3.1.0
+
+## null
+
+### Patch Changes
+
+- Updated dependencies [75857cf]
+- Updated dependencies [1dd2b16]
+- Updated dependencies [220be99]
+- Updated dependencies [b93034d]
+- Updated dependencies [59ff2ee]
+  - open-next@3.0.8
+
+## null
+
+### Patch Changes
+
+- Updated dependencies [1a1441c]
+- Updated dependencies [b8ffa3a]
+- Updated dependencies [ab0f8b2]
+- Updated dependencies [7beaf82]
+- Updated dependencies [e2d0c7f]
+  - open-next@3.0.7
+
+## null
+
+### Patch Changes
+
 - Updated dependencies [208f7ba]
 - Updated dependencies [7931bee]
 - Updated dependencies [579f9eb]

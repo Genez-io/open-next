@@ -24,6 +24,8 @@ declare global {
   var __als: AsyncLocalStorage<{
     requestId: string;
     pendingPromiseRunner: DetachedPromiseRunner;
+    isISRRevalidation?: boolean;
+    mergeHeadersPriority?: "middleware" | "handler";
   }>;
 }
 
@@ -38,6 +40,7 @@ export async function createMainHandler() {
     : config.default;
 
   globalThis.serverId = generateUniqueId();
+  globalThis.openNextConfig = config;
 
   // Default queue
   globalThis.queue = await resolveQueue(thisFunction.override?.queue);

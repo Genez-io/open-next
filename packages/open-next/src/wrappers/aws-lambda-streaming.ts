@@ -1,11 +1,11 @@
-import { Writable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 import zlib from "node:zlib";
 
 import { APIGatewayProxyEventV2 } from "aws-lambda";
 import { StreamCreator } from "http/index.js";
 import { WrapperHandler } from "types/open-next";
 
-import { error } from "../adapters/logger";
+import { debug, error } from "../adapters/logger";
 import { WarmerEvent, WarmerResponse } from "../adapters/warmer-function";
 
 type AwsLambdaEvent = APIGatewayProxyEventV2 | WarmerEvent;
@@ -23,7 +23,12 @@ function formatWarmerResponse(event: WarmerEvent) {
 
 const handler: WrapperHandler = async (handler, converter) =>
   awslambda.streamifyResponse(
-    async (event: AwsLambdaEvent, responseStream): Promise<AwsLambdaReturn> => {
+    async (
+      event: AwsLambdaEvent,
+      responseStream,
+      context,
+    ): Promise<AwsLambdaReturn> => {
+      context.callbackWaitsForEmptyEventLoop = false;
       if ("type" in event) {
         const result = await formatWarmerResponse(event);
         responseStream.end(Buffer.from(JSON.stringify(result)), "utf-8");
@@ -71,14 +76,11 @@ const handler: WrapperHandler = async (handler, converter) =>
 
       const streamCreator: StreamCreator = {
         writeHeaders: (_prelude) => {
-          _prelude.headers["content-encoding"] = contentEncoding;
-
           responseStream.setContentType(
             "application/vnd.awslambda.http-integration-response",
           );
           _prelude.headers["content-encoding"] = contentEncoding;
-          // We need to remove the set-cookie header as otherwise it will be set twice, once with the cookies in the prelude, and a second time with the set-cookie headers
-          delete _prelude.headers["set-cookie"];
+
           const prelude = JSON.stringify(_prelude);
 
           responseStream.write(prelude);
@@ -95,7 +97,18 @@ const handler: WrapperHandler = async (handler, converter) =>
 
       const response = await handler(internalEvent, streamCreator);
 
-      return converter.convertTo(response);
+      const isUsingEdge = globalThis.isEdgeRuntime ?? false;
+      if (isUsingEdge) {
+        debug("Headers has not been set, we must be in the edge runtime");
+        const stream = streamCreator.writeHeaders({
+          statusCode: response.statusCode,
+          headers: response.headers as Record<string, string>,
+          cookies: [],
+        });
+        Readable.fromWeb(response.body).pipe(stream);
+      }
+
+      // return converter.convertTo(response);
     },
   );
 

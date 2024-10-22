@@ -1,3 +1,5 @@
+import url from "node:url";
+
 import {
   copyFileSync,
   existsSync,
@@ -14,6 +16,15 @@ import { NextConfig, PrerenderManifest } from "types/next-types";
 
 import logger from "../logger.js";
 
+const __dirname = url.fileURLToPath(new URL(".", import.meta.url));
+
+function copyPatchFile(outputDir: string) {
+  const patchFile = path.join(__dirname, "patch", "patchedAsyncStorage.js");
+  const outputPatchFile = path.join(outputDir, "patchedAsyncStorage.cjs");
+  copyFileSync(patchFile, outputPatchFile);
+}
+
+// eslint-disable-next-line sonarjs/cognitive-complexity
 export async function copyTracedFiles(
   buildOutputPath: string,
   packagePath: string,
@@ -79,16 +90,24 @@ export async function copyTracedFiles(
         ),
       );
     } catch (e) {
-      //TODO: add a link to the docs
-      throw new Error(
-        `
+      if (existsSync(path.join(standaloneNextDir, fullFilePath))) {
+        //TODO: add a link to the docs
+        throw new Error(
+          `
 --------------------------------------------------------------------------------
 ${pagePath} cannot use the edge runtime.
 OpenNext requires edge runtime function to be defined in a separate function. 
 See the docs for more information on how to bundle edge runtime functions.
 --------------------------------------------------------------------------------
         `,
-      );
+        );
+      } else {
+        throw new Error(`
+--------------------------------------------------------------------------------
+We cannot find the route for ${pagePath}.
+File ${fullFilePath} does not exist
+--------------------------------------------------------------------------------`);
+      }
     }
     const dir = path.dirname(fullFilePath);
     extractFiles(
@@ -204,6 +223,9 @@ See the docs for more information on how to bundle edge runtime functions.
       );
     }
   });
+
+  // Copy patch file
+  copyPatchFile(path.join(outputDir, packagePath));
 
   // TODO: Recompute all the files.
   // vercel doesn't seem to do it, but it seems wasteful to have all those files

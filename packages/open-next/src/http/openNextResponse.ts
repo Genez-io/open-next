@@ -82,11 +82,6 @@ export class OpenNextNodeResponse extends Transform implements ServerResponse {
     private initialHeaders?: OutgoingHttpHeaders,
   ) {
     super();
-    if (initialHeaders && initialHeaders[SET_COOKIE_HEADER]) {
-      this._cookies = parseCookies(
-        initialHeaders[SET_COOKIE_HEADER] as string | string[],
-      ) as string[];
-    }
     this.once("finish", () => {
       if (!this.headersSent) {
         this.flushHeaders();
@@ -96,7 +91,7 @@ export class OpenNextNodeResponse extends Transform implements ServerResponse {
       globalThis.__als
         ?.getStore()
         ?.pendingPromiseRunner.add(onEnd(this.headers));
-      const bodyLength = this.body.length;
+      const bodyLength = this.getBody().length;
       this.streamCreator?.onFinish(bodyLength);
     });
   }
@@ -151,14 +146,6 @@ export class OpenNextNodeResponse extends Transform implements ServerResponse {
     return this.headers;
   }
 
-  getFixedHeaders(): OutgoingHttpHeaders {
-    // Do we want to apply this on writeHead?
-    this.fixHeaders(this.headers);
-    // This way we ensure that the cookies are correct
-    this.headers[SET_COOKIE_HEADER] = this._cookies;
-    return this.headers;
-  }
-
   getHeader(name: string): OutgoingHttpHeader | undefined {
     return this.headers[name.toLowerCase()];
   }
@@ -172,28 +159,43 @@ export class OpenNextNodeResponse extends Transform implements ServerResponse {
     this.headersSent = true;
     // Initial headers should be merged with the new headers
     // These initial headers are the one created either in the middleware or in next.config.js
-    // We choose to override response headers with middleware headers
-    // This is different than the default behavior in next.js, but it allows more customization
-    // TODO: We probably want to change this behavior in the future to follow next
-    // We could add a prefix header that would allow to force the middleware headers
-    // Something like open-next-force-cache-control would override the cache-control header
+    const mergeHeadersPriority =
+      globalThis.__als?.getStore()?.mergeHeadersPriority ?? "middleware";
     if (this.initialHeaders) {
-      this.headers = {
-        ...this.headers,
-        ...this.initialHeaders,
-      };
+      this.headers =
+        mergeHeadersPriority === "middleware"
+          ? {
+              ...this.headers,
+              ...this.initialHeaders,
+            }
+          : {
+              ...this.initialHeaders,
+              ...this.headers,
+            };
+      const initialCookies = parseCookies(
+        (this.initialHeaders[SET_COOKIE_HEADER] as string | string[]) ?? [],
+      ) as string[];
+      this._cookies =
+        mergeHeadersPriority === "middleware"
+          ? [...this._cookies, ...initialCookies]
+          : [...initialCookies, ...this._cookies];
     }
     this.fixHeaders(this.headers);
-    if (this._cookies.length > 0) {
-      // For cookies we cannot do the same as for other headers
-      this.headers[SET_COOKIE_HEADER] = this._cookies;
-    }
+
+    // We need to fix the set-cookie header here
+    this.headers[SET_COOKIE_HEADER] = this._cookies;
+
+    const parsedHeaders = parseHeaders(this.headers);
+
+    // We need to remove the set-cookie header from the parsed headers because
+    // it does not handle multiple set-cookie headers properly
+    delete parsedHeaders[SET_COOKIE_HEADER];
 
     if (this.streamCreator) {
       this.responseStream = this.streamCreator?.writeHeaders({
         statusCode: this.statusCode ?? 200,
         cookies: this._cookies,
-        headers: parseHeaders(this.headers),
+        headers: parsedHeaders,
       });
       this.pipe(this.responseStream);
     }
@@ -265,7 +267,19 @@ export class OpenNextNodeResponse extends Transform implements ServerResponse {
     return this;
   }
 
-  get body() {
+  /**
+   * OpenNext specific method
+   */
+
+  getFixedHeaders(): OutgoingHttpHeaders {
+    // Do we want to apply this on writeHead?
+    this.fixHeaders(this.headers);
+    // This way we ensure that the cookies are correct
+    this.headers[SET_COOKIE_HEADER] = this._cookies;
+    return this.headers;
+  }
+
+  getBody() {
     return Buffer.concat(this._chunks);
   }
 
@@ -297,7 +311,7 @@ export class OpenNextNodeResponse extends Transform implements ServerResponse {
   //There is another known issue with aws lambda streaming where the request reach the lambda only way after the request has been sent by the client. For this there is absolutely nothing we can do, contact aws support if that's your case
   _flush(callback: TransformCallback): void {
     if (
-      this.body.length < 1 &&
+      this.getBody().length < 1 &&
       // We use an env variable here because not all aws account have the same behavior
       // On some aws accounts the response will hang if the body is empty
       // We are modifying the response body here, this is not a good practice
@@ -308,6 +322,11 @@ export class OpenNextNodeResponse extends Transform implements ServerResponse {
     }
     callback();
   }
+
+  /**
+   * Next specific methods
+   * On earlier versions of next.js, those methods are mandatory to make everything work
+   */
 
   get sent() {
     return this.finished || this.headersSent;
@@ -324,7 +343,30 @@ export class OpenNextNodeResponse extends Transform implements ServerResponse {
   }
 
   send() {
-    const body = this.body;
+    const body = this.getBody();
     this.end(body);
+  }
+
+  body(value: string) {
+    this.write(value);
+    return this;
+  }
+
+  onClose(callback: () => void) {
+    this.on("close", callback);
+  }
+
+  redirect(destination: string, statusCode: number) {
+    this.setHeader("Location", destination);
+    this.statusCode = statusCode;
+
+    // Since IE11 doesn't support the 308 header add backwards
+    // compatibility using refresh header
+    if (statusCode === 308) {
+      this.setHeader("Refresh", `0;url=${destination}`);
+    }
+
+    //TODO: test to see if we need to call end here
+    return this;
   }
 }

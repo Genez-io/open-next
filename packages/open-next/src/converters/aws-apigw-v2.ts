@@ -1,6 +1,7 @@
 import { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { parseCookies } from "http/util";
 import type { Converter, InternalEvent, InternalResult } from "types/open-next";
+import { fromReadableStream } from "utils/stream";
 
 import { debug } from "../adapters/logger";
 import { convertToQuery } from "../core/routing/util";
@@ -85,11 +86,12 @@ async function convertFromAPIGatewayProxyEventV2(
   };
 }
 
-function convertToApiGatewayProxyResultV2(
+async function convertToApiGatewayProxyResultV2(
   result: InternalResult,
-): APIGatewayProxyResultV2 {
+): Promise<APIGatewayProxyResultV2> {
   const headers: Record<string, string> = {};
   Object.entries(result.headers)
+    .map(([key, value]) => [key.toLowerCase(), value] as const)
     .filter(
       ([key]) =>
         !CloudFrontBlacklistedHeaders.some((header) =>
@@ -104,11 +106,13 @@ function convertToApiGatewayProxyResultV2(
       headers[key] = Array.isArray(value) ? value.join(", ") : `${value}`;
     });
 
+  const body = await fromReadableStream(result.body, result.isBase64Encoded);
+
   const response: APIGatewayProxyResultV2 = {
     statusCode: result.statusCode,
     headers,
     cookies: parseCookies(result.headers["set-cookie"]),
-    body: result.body,
+    body,
     isBase64Encoded: result.isBase64Encoded,
   };
   debug(response);

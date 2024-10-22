@@ -60,19 +60,22 @@ export type Header = {
   has?: RouteHas[];
   missing?: RouteHas[];
 };
+
+export interface i18nConfig {
+  locales: string[];
+  defaultLocale: string;
+}
 export interface NextConfig {
   basePath?: string;
-  trailingSlash?: string;
+  trailingSlash?: boolean;
   skipTrailingSlashRedirect?: boolean;
-  i18n?: {
-    locales: string[];
-    defaultLocale: string;
-  };
+  i18n?: i18nConfig;
   experimental: {
     serverActions?: boolean;
     appDir?: boolean;
   };
   images: ImageConfig;
+  poweredByHeader?: boolean;
 }
 
 export interface RouteDefinition {
@@ -92,6 +95,7 @@ export interface RewriteDefinition {
   has?: RouteHas[];
   missing?: RouteHas[];
   regex: string;
+  locale?: false;
 }
 
 export interface RedirectDefinition extends RewriteDefinition {
@@ -100,6 +104,7 @@ export interface RedirectDefinition extends RewriteDefinition {
 }
 
 export interface RoutesManifest {
+  basePath?: string;
   dynamicRoutes: RouteDefinition[];
   staticRoutes: RouteDefinition[];
   dataRoutes: DataRouteDefinition[];
@@ -146,7 +151,13 @@ export interface MiddlewareManifest {
 }
 
 export interface PrerenderManifest {
-  routes: Record<string, never>;
+  routes: Record<
+    string,
+    {
+      // TODO: add the rest when needed for PPR
+      initialRevalidateSeconds: number | false;
+    }
+  >;
   dynamicRoutes: {
     [route: string]: {
       routeRegex: string;

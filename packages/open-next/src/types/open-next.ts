@@ -1,4 +1,5 @@
 import type { Readable } from "node:stream";
+import type { ReadableStream } from "node:stream/web";
 
 import type { StreamCreator } from "http/index.js";
 
@@ -25,7 +26,7 @@ export type InternalEvent = {
 export type InternalResult = {
   statusCode: number;
   headers: Record<string, string | string[]>;
-  body: string;
+  body: ReadableStream;
   isBase64Encoded: boolean;
 } & BaseEventOrResult<"core">;
 
@@ -41,6 +42,21 @@ export interface DangerousOptions {
    * @default false
    */
   disableIncrementalCache?: boolean;
+  /**
+   * Enable the cache interception.
+   * Every request will go through the cache interceptor, if it is found in the cache, it will be returned without going through NextServer.
+   * Not every feature is covered by the cache interceptor and it should fallback to the NextServer if the cache is not found.
+   * @default false
+   */
+  enableCacheInterception?: boolean;
+  /**
+   * Function to determine which headers or cookies takes precedence.
+   * By default, the middleware headers and cookies will override the handler headers and cookies.
+   * This is executed for every request and after next config headers and middleware has executed.
+   */
+  headersAndCookiesPriority?: (
+    event: InternalEvent,
+  ) => "middleware" | "handler";
 }
 
 export type BaseOverride = {
@@ -58,7 +74,7 @@ export type Converter<
   R extends BaseEventOrResult = InternalResult,
 > = BaseOverride & {
   convertFrom: (event: any) => Promise<E>;
-  convertTo: (result: R, originalRequest?: any) => any;
+  convertTo: (result: R, originalRequest?: any) => Promise<any>;
 };
 
 export type WrapperHandler<
@@ -75,6 +91,7 @@ export type Wrapper<
 > = BaseOverride & {
   wrapper: WrapperHandler<E, R>;
   supportStreaming: boolean;
+  edgeRuntime?: boolean;
 };
 
 export type Warmer = BaseOverride & {
@@ -252,6 +269,13 @@ export interface OpenNextConfig {
   middleware?: DefaultFunctionOptions & {
     //We force the middleware to be a function
     external: true;
+
+    /**
+     * The override options for the middleware.
+     * By default the lite override are used (.i.e. s3-lite, dynamodb-lite, sqs-lite)
+     * @default undefined
+     */
+    override?: OverrideOptions;
 
     /**
      * Origin resolver is used to resolve the origin for internal rewrite.

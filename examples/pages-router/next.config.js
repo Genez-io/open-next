@@ -12,6 +12,17 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  headers: () => [
+    {
+      source: "/",
+      headers: [
+        {
+          key: "x-custom-header",
+          value: "my custom header value",
+        },
+      ],
+    },
+  ],
   rewrites: () => [
     { source: "/rewrite", destination: "/", locale: false },
     {
@@ -35,8 +46,14 @@ const nextConfig = {
       basePath: false,
       locale: false,
     },
+    {
+      source: "/redirect-with-locale/",
+      destination: "/ssr/",
+      permanent: false,
+    },
   ],
   trailingSlash: true,
+  poweredByHeader: true,
 };
 
 module.exports = nextConfig;

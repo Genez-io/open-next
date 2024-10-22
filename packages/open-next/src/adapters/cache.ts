@@ -21,7 +21,7 @@ interface CachedRedirectValue {
 }
 
 interface CachedRouteValue {
-  kind: "ROUTE";
+  kind: "ROUTE" | "APP_ROUTE";
   // this needs to be a RenderResult so since renderResponse
   // expects that type instead of a string
   body: Buffer;
@@ -39,7 +39,7 @@ interface CachedImageValue {
 }
 
 interface IncrementalCachedPageValue {
-  kind: "PAGE";
+  kind: "PAGE" | "PAGES";
   // this needs to be a string since the cache expects to store
   // the string value
   html: string;
@@ -48,9 +48,21 @@ interface IncrementalCachedPageValue {
   headers?: Record<string, undefined | string>;
 }
 
+interface IncrementalCachedAppPageValue {
+  kind: "APP_PAGE";
+  // this needs to be a string since the cache expects to store
+  // the string value
+  html: string;
+  rscData: Buffer;
+  headers?: Record<string, undefined | string | string[]>;
+  postponed?: string;
+  status?: number;
+}
+
 type IncrementalCacheValue =
   | CachedRedirectValue
   | IncrementalCachedPageValue
+  | IncrementalCachedAppPageValue
   | CachedImageValue
   | CachedFetchValue
   | CachedRouteValue;
@@ -94,6 +106,7 @@ declare global {
   var disableDynamoDBCache: boolean;
   var disableIncrementalCache: boolean;
   var lastModified: Record<string, number>;
+  var isNextAfter15: boolean;
 }
 // We need to use globalThis client here as this class can be defined at load time in next 12 but client is not available at load time
 export default class S3Cache {
@@ -104,7 +117,12 @@ export default class S3Cache {
     // fetchCache is for next 13.5 and above, kindHint is for next 14 and above and boolean is for earlier versions
     options?:
       | boolean
-      | { fetchCache?: boolean; kindHint?: "app" | "pages" | "fetch" },
+      | {
+          fetchCache?: boolean;
+          kindHint?: "app" | "pages" | "fetch";
+          tags?: string[];
+          softTags?: string[];
+        },
   ) {
     if (globalThis.disableIncrementalCache) {
       return null;
@@ -115,13 +133,16 @@ export default class S3Cache {
           ? options.kindHint === "fetch"
           : options.fetchCache
         : options;
+
+    const softTags = typeof options === "object" ? options.softTags : [];
+    const tags = typeof options === "object" ? options.tags : [];
     return isFetchCache
-      ? this.getFetchCache(key)
+      ? this.getFetchCache(key, softTags, tags)
       : this.getIncrementalCache(key);
   }
 
-  async getFetchCache(key: string) {
-    debug("get fetch cache", { key });
+  async getFetchCache(key: string, softTags?: string[], tags?: string[]) {
+    debug("get fetch cache", { key, softTags, tags });
     try {
       const { value, lastModified } = await globalThis.incrementalCache.get(
         key,
@@ -138,6 +159,28 @@ export default class S3Cache {
       }
 
       if (value === undefined) return null;
+
+      // For cases where we don't have tags, we need to ensure that the soft tags are not being revalidated
+      // We only need to check for the path as it should already contain all the tags
+      if ((tags ?? []).length === 0) {
+        // Then we need to find the path for the given key
+        const path = softTags?.find(
+          (tag) =>
+            tag.startsWith("_N_T_/") &&
+            !tag.endsWith("layout") &&
+            !tag.endsWith("page"),
+        );
+        if (path) {
+          const pathLastModified = await globalThis.tagCache.getLastModified(
+            path.replace("_N_T_/", ""),
+            lastModified,
+          );
+          if (pathLastModified === -1) {
+            // In case the path has been revalidated, we don't want to use the fetch cache
+            return null;
+          }
+        }
+      }
 
       return {
         lastModified: _lastModified,
@@ -173,7 +216,7 @@ export default class S3Cache {
         return {
           lastModified: _lastModified,
           value: {
-            kind: "ROUTE",
+            kind: globalThis.isNextAfter15 ? "APP_ROUTE" : "ROUTE",
             body: Buffer.from(
               cacheData.body ?? Buffer.alloc(0),
               isBinaryContentType(String(meta?.headers?.["content-type"]))
@@ -185,10 +228,23 @@ export default class S3Cache {
           },
         } as CacheHandlerValue;
       } else if (cacheData?.type === "page" || cacheData?.type === "app") {
+        if (globalThis.isNextAfter15 && cacheData?.type === "app") {
+          return {
+            lastModified: _lastModified,
+            value: {
+              kind: "APP_PAGE",
+              html: cacheData.html,
+              rscData: Buffer.from(cacheData.rsc),
+              status: meta?.status,
+              headers: meta?.headers,
+              postponed: meta?.postponed,
+            },
+          } as CacheHandlerValue;
+        }
         return {
           lastModified: _lastModified,
           value: {
-            kind: "PAGE",
+            kind: globalThis.isNextAfter15 ? "PAGES" : "PAGE",
             html: cacheData.html,
             pageData:
               cacheData.type === "page" ? cacheData.json : cacheData.rsc,
@@ -229,61 +285,95 @@ export default class S3Cache {
       .getStore()
       ?.pendingPromiseRunner.withResolvers<void>();
     try {
-      if (data?.kind === "ROUTE") {
-        const { body, status, headers } = data;
-        await globalThis.incrementalCache.set(
-          key,
-          {
-            type: "route",
-            body: body.toString(
-              isBinaryContentType(String(headers["content-type"]))
-                ? "base64"
-                : "utf8",
-            ),
-            meta: {
-              status,
-              headers,
-            },
-          },
-          false,
-        );
-      } else if (data?.kind === "PAGE") {
-        const { html, pageData } = data;
-        const isAppPath = typeof pageData === "string";
-        if (isAppPath) {
-          await globalThis.incrementalCache.set(
-            key,
-            {
-              type: "app",
-              html,
-              rsc: pageData,
-            },
-            false,
-          );
-        } else {
-          await globalThis.incrementalCache.set(
-            key,
-            {
-              type: "page",
-              html,
-              json: pageData,
-            },
-            false,
-          );
-        }
-      } else if (data?.kind === "FETCH") {
-        await globalThis.incrementalCache.set<true>(key, data, true);
-      } else if (data?.kind === "REDIRECT") {
-        await globalThis.incrementalCache.set(
-          key,
-          {
-            type: "redirect",
-            props: data.props,
-          },
-          false,
-        );
-      } else if (data === null || data === undefined) {
+      if (data === null || data === undefined) {
         await globalThis.incrementalCache.delete(key);
+      } else {
+        switch (data.kind) {
+          case "ROUTE":
+          case "APP_ROUTE":
+            const { body, status, headers } = data;
+            await globalThis.incrementalCache.set(
+              key,
+              {
+                type: "route",
+                body: body.toString(
+                  isBinaryContentType(String(headers["content-type"]))
+                    ? "base64"
+                    : "utf8",
+                ),
+                meta: {
+                  status,
+                  headers,
+                },
+              },
+              false,
+            );
+            break;
+          case "PAGE":
+          case "PAGES": {
+            const { html, pageData, status, headers } = data;
+            const isAppPath = typeof pageData === "string";
+            if (isAppPath) {
+              await globalThis.incrementalCache.set(
+                key,
+                {
+                  type: "app",
+                  html,
+                  rsc: pageData,
+                  meta: {
+                    status,
+                    headers,
+                  },
+                },
+                false,
+              );
+            } else {
+              await globalThis.incrementalCache.set(
+                key,
+                {
+                  type: "page",
+                  html,
+                  json: pageData,
+                },
+                false,
+              );
+            }
+            break;
+          }
+          case "APP_PAGE": {
+            const { html, rscData, headers, status } = data;
+            await globalThis.incrementalCache.set(
+              key,
+              {
+                type: "app",
+                html,
+                rsc: rscData.toString("utf8"),
+                meta: {
+                  status,
+                  headers,
+                },
+              },
+              false,
+            );
+            break;
+          }
+          case "FETCH":
+            await globalThis.incrementalCache.set<true>(key, data, true);
+            break;
+          case "REDIRECT":
+            await globalThis.incrementalCache.set(
+              key,
+              {
+                type: "redirect",
+                props: data.props,
+              },
+              false,
+            );
+            break;
+          case "IMAGE":
+            // Not implemented
+            break;
+        }
       }
       // Write derivedTags to dynamodb
       // If we use an in house version of getDerivedTags in build we should use it here instead of next's one
@@ -305,6 +395,9 @@ export default class S3Cache {
           tagsToWrite.map((tag) => ({
             path: key,
             tag: tag,
+            // In case the tags are not there we just need to create them
+            // but we don't want them to return from `getLastModified` as they are not stale
+            revalidatedAt: 1,
           })),
         );
       }
@@ -317,22 +410,45 @@ export default class S3Cache {
     }
   }
 
-  public async revalidateTag(tag: string) {
+  public async revalidateTag(tags: string | string[]) {
     if (globalThis.disableDynamoDBCache || globalThis.disableIncrementalCache) {
       return;
     }
     try {
-      debug("revalidateTag", tag);
-      // Find all keys with the given tag
-      const paths = await globalThis.tagCache.getByTag(tag);
-      debug("Items", paths);
-      // Update all keys with the given tag with revalidatedAt set to now
-      await globalThis.tagCache.writeTags(
-        paths?.map((path) => ({
-          path: path,
-          tag: tag,
-        })) ?? [],
-      );
+      const _tags = Array.isArray(tags) ? tags : [tags];
+      for (const tag of _tags) {
+        debug("revalidateTag", tag);
+        // Find all keys with the given tag
+        const paths = await globalThis.tagCache.getByTag(tag);
+        debug("Items", paths);
+        const toInsert = paths.map((path) => ({
+          path,
+          tag,
+        }));
+
+        // If the tag is a soft tag, we should also revalidate the hard tags
+        if (tag.startsWith("_N_T_/")) {
+          for (const path of paths) {
+            // We need to find all hard tags for a given path
+            const _tags = await globalThis.tagCache.getByPath(path);
+            const hardTags = _tags.filter((t) => !t.startsWith("_N_T_/"));
+            // For every hard tag, we need to find all paths and revalidate them
+            for (const hardTag of hardTags) {
+              const _paths = await globalThis.tagCache.getByTag(hardTag);
+              debug({ hardTag, _paths });
+              toInsert.push(
+                ..._paths.map((path) => ({
+                  path,
+                  tag: hardTag,
+                })),
+              );
+            }
+          }
+        }
+
+        // Update all keys with the given tag with revalidatedAt set to now
+        await globalThis.tagCache.writeTags(toInsert);
+      }
     } catch (e) {
       error("Failed to revalidate tag", e);
     }

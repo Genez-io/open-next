@@ -7,11 +7,10 @@ import {
   DefaultOverrideOptions,
   FunctionOptions,
   LazyLoadedOverride,
-  OpenNextConfig,
   OverrideOptions,
 } from "types/open-next";
 
-import { getBuildId } from "./helper.js";
+import { type BuildOptions, getBuildId } from "./helper.js";
 
 type BaseFunction = {
   handler: string;
@@ -92,6 +91,8 @@ interface OpenNextOutput {
   };
 }
 
+const indexHandler = "index.handler";
+
 async function canStream(opts: FunctionOptions) {
   if (!opts.override?.wrapper) {
     return false;
@@ -161,10 +162,9 @@ function prefixPattern(basePath: string) {
   };
 }
 
-export async function generateOutput(
-  outputPath: string,
-  config: OpenNextConfig,
-) {
+// eslint-disable-next-line sonarjs/cognitive-complexity
+export async function generateOutput(options: BuildOptions) {
+  const { appBuildOutputPath, config } = options;
   const edgeFunctions: OpenNextOutput["edgeFunctions"] = {};
   const isExternalMiddleware = config.middleware?.external ?? false;
   if (isExternalMiddleware) {
@@ -183,7 +183,7 @@ export async function generateOutput(
     if (value.placement === "global") {
       edgeFunctions[key] = {
         bundle: `.open-next/functions/${key}`,
-        handler: "index.handler",
+        handler: indexHandler,
         ...(await extractOverrideFn(value.override)),
       };
     }
@@ -194,7 +194,7 @@ export async function generateOutput(
   //Load required-server-files.json
   const requiredServerFiles = JSON.parse(
     fs.readFileSync(
-      path.join(outputPath, ".next", "required-server-files.json"),
+      path.join(appBuildOutputPath, ".next", "required-server-files.json"),
       "utf-8",
     ),
   ).config as NextConfig;
@@ -228,7 +228,7 @@ export async function generateOutput(
     },
     imageOptimizer: {
       type: "function",
-      handler: "index.handler",
+      handler: indexHandler,
       bundle: ".open-next/image-optimization-function",
       streaming: false,
       imageLoader: await extractOverrideName(
@@ -247,7 +247,7 @@ export async function generateOutput(
         }
       : {
           type: "function",
-          handler: "index.handler",
+          handler: indexHandler,
           bundle: ".open-next/server-functions/default",
           streaming: defaultOriginCanstream,
           ...(await extractOverrideFn(config.default.override)),
@@ -274,7 +274,7 @@ export async function generateOutput(
           const streaming = await canStream(value);
           origins[key] = {
             type: "function",
-            handler: "index.handler",
+            handler: indexHandler,
             bundle: `.open-next/server-functions/${key}`,
             streaming,
             ...(await extractOverrideFn(value.override)),
@@ -295,7 +295,9 @@ export async function generateOutput(
     const patterns = "patterns" in value ? value.patterns : ["*"];
     patterns.forEach((pattern) => {
       behaviors.push({
-        pattern: prefixer(pattern.replace(/BUILD_ID/, getBuildId(outputPath))),
+        pattern: prefixer(
+          pattern.replace(/BUILD_ID/, getBuildId(appBuildOutputPath)),
+        ),
         origin: value.placement === "global" ? undefined : key,
         edgeFunction:
           value.placement === "global"
@@ -320,7 +322,7 @@ export async function generateOutput(
   });
 
   //Compute behaviors for assets files
-  const assetPath = path.join(outputPath, ".open-next", "assets");
+  const assetPath = path.join(appBuildOutputPath, ".open-next", "assets");
   fs.readdirSync(assetPath).forEach((item) => {
     if (fs.statSync(path.join(assetPath, item)).isDirectory()) {
       behaviors.push({
@@ -338,7 +340,9 @@ export async function generateOutput(
   // Check if we produced a dynamodb provider output
   const isTagCacheDisabled =
     config.dangerous?.disableTagCache ||
-    !fs.existsSync(path.join(outputPath, ".open-next", "dynamodb-provider"));
+    !fs.existsSync(
+      path.join(appBuildOutputPath, ".open-next", "dynamodb-provider"),
+    );
 
   const output: OpenNextOutput = {
     edgeFunctions,
@@ -348,25 +352,25 @@ export async function generateOutput(
       disableIncrementalCache: config.dangerous?.disableIncrementalCache,
       disableTagCache: config.dangerous?.disableTagCache,
       warmer: {
-        handler: "index.handler",
+        handler: indexHandler,
         bundle: ".open-next/warmer-function",
       },
       initializationFunction: isTagCacheDisabled
         ? undefined
         : {
-            handler: "index.handler",
+            handler: indexHandler,
             bundle: ".open-next/dynamodb-provider",
           },
       revalidationFunction: config.dangerous?.disableIncrementalCache
         ? undefined
         : {
-            handler: "index.handler",
+            handler: indexHandler,
             bundle: ".open-next/revalidation-function",
           },
     },
   };
   fs.writeFileSync(
-    path.join(outputPath, ".open-next", "open-next.output.json"),
+    path.join(appBuildOutputPath, ".open-next", "open-next.output.json"),
     JSON.stringify(output),
   );
 }

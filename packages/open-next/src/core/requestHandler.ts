@@ -9,6 +9,7 @@ import { InternalEvent, InternalResult } from "types/open-next";
 import { DetachedPromiseRunner } from "utils/promise";
 
 import { debug, error, warn } from "../adapters/logger";
+import { patchAsyncStorage } from "./patchAsyncStorage";
 import { convertRes, createServerResponse, proxyRequest } from "./routing/util";
 import routingHandler, { MiddlewareOutputEvent } from "./routingHandler";
 import { requestHandler, setNextjsPrebundledReact } from "./util";
@@ -17,7 +18,11 @@ import { requestHandler, setNextjsPrebundledReact } from "./util";
 globalThis.__als = new AsyncLocalStorage<{
   requestId: string;
   pendingPromiseRunner: DetachedPromiseRunner;
+  isISRRevalidation?: boolean;
+  mergeHeadersPriority?: "middleware" | "handler";
 }>();
+
+patchAsyncStorage();
 
 export async function openNextHandler(
   internalEvent: InternalEvent,
@@ -63,12 +68,22 @@ export async function openNextHandler(
   }, {});
 
   if ("type" in preprocessResult) {
-    // res is used only in the streaming case
-    const res = createServerResponse(internalEvent, headers, responseStreaming);
-    res.statusCode = preprocessResult.statusCode;
-    res.flushHeaders();
-    res.write(preprocessResult.body);
-    res.end();
+    // // res is used only in the streaming case
+    if (responseStreaming) {
+      const res = createServerResponse(
+        internalEvent,
+        headers,
+        responseStreaming,
+      );
+      res.statusCode = preprocessResult.statusCode;
+      res.flushHeaders();
+      const [bodyToConsume, bodyToReturn] = preprocessResult.body.tee();
+      for await (const chunk of bodyToConsume) {
+        res.write(chunk);
+      }
+      res.end();
+      preprocessResult.body = bodyToReturn;
+    }
     return preprocessResult;
   } else {
     const preprocessedEvent = preprocessResult.internalEvent;
@@ -88,8 +103,20 @@ export async function openNextHandler(
     const requestId = Math.random().toString(36);
     const pendingPromiseRunner: DetachedPromiseRunner =
       new DetachedPromiseRunner();
+    const isISRRevalidation = headers["x-isr"] === "1";
+    const mergeHeadersPriority = globalThis.openNextConfig.dangerous
+      ?.headersAndCookiesPriority
+      ? globalThis.openNextConfig.dangerous.headersAndCookiesPriority(
+          preprocessedEvent,
+        )
+      : "middleware";
     const internalResult = await globalThis.__als.run(
-      { requestId, pendingPromiseRunner },
+      {
+        requestId,
+        pendingPromiseRunner,
+        isISRRevalidation,
+        mergeHeadersPriority,
+      },
       async () => {
         const preprocessedResult = preprocessResult as MiddlewareOutputEvent;
         const req = new IncomingMessage(reqProps);
