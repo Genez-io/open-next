@@ -3,7 +3,7 @@
     "access": "public"
   },
   "name": "@genezio/open-next",
-  "version": "3.0.9",
+  "version": "3.0.10",
   "bin": {
     "open-next": "./dist/index.js"
   },
